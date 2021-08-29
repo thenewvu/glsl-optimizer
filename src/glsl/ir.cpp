@@ -1980,7 +1980,7 @@ mode_string(const ir_variable *var)
 {
    switch (var->data.mode) {
    case ir_var_auto:
-      return (var->data.read_only) ? "global constant" : "global variable";
+      return (var->data.read_only) ? "local const var" : "local var";
 
    case ir_var_uniform:
       return "uniform";

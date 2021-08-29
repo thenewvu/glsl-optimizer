@@ -336,26 +336,71 @@ void ir_print_glsl_visitor::newline_deindent()
 	}
 }
 
+char*
+_encrypt_var_name(char* name, int len) {
+	static const char chars[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+	static const int nchars = strlen(chars);
+
+	for (int i = 0; i < len; i++)
+		name[i] = chars[name[i] % nchars];
+
+	return name;
+}
 
 void ir_print_glsl_visitor::print_var_name (ir_variable* v)
 {
-    long id = (long)hash_table_find (globals->var_hash, v);
-	if (!id && v->data.mode == ir_var_temporary)
+	// special built-in variables
+	if (!strcmp(v->name, "gl_FragDepth")
+	||  !strcmp(v->name, "gl_FragCoord")
+	||  !strcmp(v->name, "gl_FrontFacing")
+	||  !strcmp(v->name, "gl_PointCoord")
+	||  !strcmp(v->name, "gl_PointSize")
+	||  !strcmp(v->name, "gl_Position")
+	||  !strcmp(v->name, "gl_VertexID")
+	||  !strcmp(v->name, "gl_InstanceID"))
 	{
-        id = ++globals->var_counter;
+		buffer.asprintf_append (v->name);
+		return;
+	}
+
+    long id = (long)hash_table_find (globals->var_hash, v);
+
+	bool is_local_var = false;
+	bool is_shader_in = false;
+	bool is_shader_out = false;
+
+	if (v->data.mode == ir_var_temporary 
+	|| (v->data.mode == ir_var_auto && !v->data.read_only))
+		is_local_var = true;
+	else if (v->data.mode == ir_var_shader_in)
+		is_shader_in = true;
+	else if (v->data.mode == ir_var_shader_out)
+		is_shader_out = true;
+
+	if (!id && is_local_var)
+	{
+		id = ++globals->var_counter;
         hash_table_insert (globals->var_hash, (void*)id, v);
 	}
+
     if (id)
-    {
-        if (v->data.mode == ir_var_temporary)
-            buffer.asprintf_append ("tmpvar_%d", (int)id);
-        else
-            buffer.asprintf_append ("%s_%d", v->name, (int)id);
-    }
-	else
-	{
-		buffer.asprintf_append ("%s", v->name);
+		buffer.asprintf_append ("tmp%d", (int)id);
+	else if (is_shader_in) {
+		const int namelen = strlen(v->name) + 1;
+		char name[namelen];
+		strncpy(name, v->name, namelen);
+		name[namelen] = '\0';
+		buffer.asprintf_append (_encrypt_var_name(name, namelen));
 	}
+	else if (is_shader_out) {
+		const int namelen = strlen(v->name) + 1;
+		char name[namelen];
+		strncpy(name, v->name, namelen);
+		name[namelen] = '\0';
+		buffer.asprintf_append (_encrypt_var_name(name, namelen));
+	}
+	else
+		buffer.asprintf_append ("%s", v->name);
 }
 
 void ir_print_glsl_visitor::print_precision (ir_instruction* ir, const glsl_type* type)
@@ -930,11 +975,14 @@ void ir_print_glsl_visitor::visit(ir_texture *ir)
 	// texture coordinate
 	ir->coordinate->accept(this);
 	
-	// lod
-	if (ir->op == ir_txl || ir->op == ir_txf)
+	if (ir_texture::has_lod(ir->sampler->type))
 	{
-		buffer.asprintf_append (", ");
-		ir->lod_info.lod->accept(this);
+		// lod
+		if (ir->op == ir_txl || ir->op == ir_txf)
+		{
+			buffer.asprintf_append (", ");
+			ir->lod_info.lod->accept(this);
+		}
 	}
 	
 	// sample index
